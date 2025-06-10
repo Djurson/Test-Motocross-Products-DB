@@ -8,7 +8,7 @@ COPY . .
 RUN go get -d -v ./...
 
 # Build the app:
-RUN go build -o api .
+RUN go build -o main .
 
 EXPOSE 8000
 
