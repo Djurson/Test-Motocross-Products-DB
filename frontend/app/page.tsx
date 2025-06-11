@@ -38,7 +38,7 @@ export default function Home() {
               <DropDown label="Modell" placeholder="Välj modell" disabled={userInput?.brand ? false : true} input={userInput} setInput={setUserInput} type="model" />
               <DropDown label="Motorstorlek" placeholder="Välj motorstorlek (cc)" disabled={userInput?.model ? false : true} input={userInput} setInput={setUserInput} type="engineSize" />
               <DropDown label="Kategori" placeholder="Välj kategori" disabled={userInput?.engineSize ? false : true} input={userInput} setInput={setUserInput} type="category" />
-              <Button className="self-end" variant="outline">
+              <Button className="self-end" variant="default">
                 Sök
               </Button>
             </div>
