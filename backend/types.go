@@ -29,8 +29,8 @@ type Motorcycle struct {
 
 type Product struct {
 	ID          int     `json:"id"`
-	Name        string  `json:"name"`
-	CategoryID  int     `json:"category_id"`
+	Name        string  `json:"name" validate:"required"`
+	CategoryID  int     `json:"category_id" validate:"required"`
 	Description *string `json:"description,omitempty"`
 	Brand       *string `json:"brand,omitempty"`
 	IsUniversal bool    `json:"is_universal"`

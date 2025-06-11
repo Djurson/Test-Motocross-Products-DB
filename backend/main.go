@@ -29,10 +29,10 @@ func main() {
 
 	// create router
 	router := mux.NewRouter()
-	router.HandleFunc("/bike/{name}/{size}/{year}", getProductsFromBike(db)).Methods("GET")
+	router.HandleFunc("/bike/{bike_brand}/{bike_model}/{bike_year}", getProductsFromBike(db)).Methods("GET")
 	router.HandleFunc("/bike/{name}", getProductsFromBrand(db)).Methods("GET")
-	router.HandleFunc("/products/{id}", getBikeFromProduct(db)).Methods("GET")
-	router.HandleFunc("/insert/products", insertProductsFromFile(db)).Methods("POST")
+	router.HandleFunc("/bike/{name}/{category}", getProductCategoryFromBrand(db)).Methods("GET")
+	router.HandleFunc("/upload", uploadFileHandler(db)).Methods("POST")
 
 	// wrap the router with CORS and JSON content type middlewares
 	enhancedRouter := enableCORS(jsonContentTypeMiddleware(router))
@@ -78,7 +78,8 @@ func createSchema(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS models (
 			id SERIAL PRIMARY KEY,
 			brand_id INTEGER NOT NULL REFERENCES brands(id),
-			name VARCHAR(100) NOT NULL
+			name VARCHAR(100) NOT NULL,
+			UNIQUE (brand_id, name)
 		)`,
 
 		`CREATE TABLE IF NOT EXISTS categories (
@@ -90,13 +91,13 @@ func createSchema(db *sql.DB) error {
 		)`,
 
 		`CREATE TABLE IF NOT EXISTS products (
-			id SERIAL PRIMARY KEY,
-			name VARCHAR(200) NOT NULL,
-			category_id INTEGER NOT NULL REFERENCES categories(id),
-			description TEXT,
-			brand VARCHAR(100),
-			is_universal BOOLEAN DEFAULT FALSE
-		)`,
+    		id VARCHAR(50) PRIMARY KEY,
+    		name VARCHAR(200) NOT NULL,
+    		category_id INTEGER NOT NULL REFERENCES categories(id),
+    		description TEXT DEFAULT,
+    		brand VARCHAR(100),
+    		is_universal BOOLEAN DEFAULT FALSE
+		);`,
 
 		`CREATE TABLE IF NOT EXISTS motorcycles (
 			id SERIAL PRIMARY KEY,
@@ -114,7 +115,7 @@ func createSchema(db *sql.DB) error {
 			ON motorcycles (brand_id, model_id, engine_size_id, startyear, endyear)`,
 
 		`CREATE TABLE IF NOT EXISTS product_compatibility (
-			product_id INTEGER NOT NULL REFERENCES products(id),
+			product_id VARCHAR(50) NOT NULL REFERENCES products(id),
 			motorcycle_id INTEGER NOT NULL REFERENCES motorcycles(id),
 			PRIMARY KEY (product_id, motorcycle_id)
 		)`,
@@ -155,6 +156,11 @@ func getProductsFromBike(db *sql.DB) http.HandlerFunc {
 		WHERE b.name = $1 AND mo.name = $2 AND m.startyear <= $3 AND m.endyear >= $3`
 
 		yearInt, err := strconv.Atoi(bike_year)
+		if err != nil {
+			http.Error(w, "Invalid year format", http.StatusBadRequest)
+			return
+		}
+		
 		rows, err := db.Query(query, bike_brand, model_name, yearInt)
 		if err != nil {
 			http.Error(w, "Database query error", http.StatusInternalServerError)
@@ -185,6 +191,106 @@ func getProductsFromBike(db *sql.DB) http.HandlerFunc {
 
 func getProductsFromBrand(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		bike_brand := vars["bike_brand"]
+
+		query := `
+		SELECT DISTINCT p.id, p.name, p.category_id, p.description, p.brand, p.is_universal
+		FROM products p
+		JOIN product_compatibility pc ON p.id = pc.product_id
+		JOIN motorcycles m ON pc.motorcycle_id = m.id
+		JOIN brands b ON m.brand_id = b.id
+		WHERE b.name = $1`
+
+		rows, err := db.Query(query, bike_brand)
+		if err != nil {
+			http.Error(w, "Database query error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var products []Product
+		for rows.Next() {
+			var p Product
+			err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.Brand, &p.IsUniversal)
+			if err != nil {
+				http.Error(w, "Error scanning row", http.StatusInternalServerError)
+				return
+			}
+			products = append(products, p)
+		}
+
+		if err = rows.Err(); err != nil {
+			http.Error(w, "Error reading rows", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(products)
+	}
+}
+
+func getProductCategoryFromBrand(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		bike_brand := vars["bike_brand"]
+		category := vars["category"]
 		
+		query := `
+		SELECT DISTINCT p.id, p.name, p.category_id, p.description, p.brand, p.is_universal
+		FROM products p
+		JOIN categories c ON p.category_id = c.id
+		JOIN product_compatibility pc ON p.id = pc.product_id
+		JOIN motorcycles m ON pc.motorcycle_id = m.id
+		JOIN brands b ON m.brand_id = b.id
+		WHERE c.name = $1 AND b.name = $2`
+
+		rows, err := db.Query(query, category, bike_brand)
+		if err != nil {
+			http.Error(w, "Database query error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var products []Product
+		for rows.Next() {
+			var p Product
+			err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.Brand, &p.IsUniversal)
+			if err != nil {
+				http.Error(w, "Error scanning row", http.StatusInternalServerError)
+				return
+			}
+			products = append(products, p)
+		}
+
+		if err = rows.Err(); err != nil {
+			http.Error(w, "Error reading rows", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(products)
+	}
+}
+
+func uploadFileHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		err := r.ParseMultipartForm(10 << 20) // Max 10MB
+		if err != nil {
+			http.Error(w, "Could not parse multipart form", http.StatusBadRequest)
+			return
+		}
+
+		vars := mux.Vars(r)
+		rootCategory := vars["category"]
+
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "Could not get file", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		csvreader(file, db, rootCategory);
 	}
 }
