@@ -1,4 +1,4 @@
-package api
+package main
 
 import (
 	"database/sql"
@@ -69,7 +69,8 @@ func insertFromCSV(records [][]string, db *sql.DB, rootCategory string) error {
 
 			startYear, endYear := parseModelYears(modYears)
 
-			motorcycleID, err := getOrCreateMotorcycle(db, brandID, modelID, startYear, endYear)
+			fullname := brandName + " " + modelName + " " + strconv.Itoa(startYear) + "-" + strconv.Itoa(endYear)
+			motorcycleID, err := getOrCreateMotorcycle(db, brandID, modelID, startYear, endYear, fullname)
 			if err != nil {
 				return fmt.Errorf("kunde inte skapa/hämta motorcycle: %w", err)
 			}
@@ -148,18 +149,18 @@ func getOrCreateModel(db *sql.DB, brandID int, modelName string) (int, error) {
 	return id, err
 }
 
-func getOrCreateMotorcycle(db *sql.DB, brandID int, modelID int, startYear int, endYear int) (int, error) {
+func getOrCreateMotorcycle(db *sql.DB, brandID int, modelID int, startYear int, endYear int, fullname string) (int, error) {
 	var id int
 
 	query := `
-        INSERT INTO motorcycles (brand_id, model_id, startyear, endyear)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (brand_id, model_id, startyear, endyear)
+        INSERT INTO motorcycles (brand_id, model_id, startyear, endyear, fullname)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (brand_id, model_id, startyear, endyear, fullname)
         DO UPDATE SET startyear = EXCLUDED.startyear
         RETURNING id
     `
 
-	err := db.QueryRow(query, brandID, modelID, startYear, endYear).Scan(&id)
+	err := db.QueryRow(query, brandID, modelID, startYear, endYear, fullname).Scan(&id)
 	return id, err
 }
 

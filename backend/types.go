@@ -1,4 +1,4 @@
-package api
+package main
 
 type Brand struct {
 	ID   int    `json:"id"`

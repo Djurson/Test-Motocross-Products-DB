@@ -1,4 +1,4 @@
-package api
+package main
 
 import (
 	"database/sql"
@@ -103,15 +103,9 @@ func createSchema(db *sql.DB) error {
     		model_id INTEGER NOT NULL REFERENCES models(id),
     		startyear INTEGER NOT NULL,
     		endyear INTEGER NOT NULL,
-    		full_name TEXT GENERATED ALWAYS AS (
-				(SELECT b.name FROM brands b WHERE b.id = brand_id) || ' ' ||
-				(SELECT m.name FROM models m WHERE m.id = model_id) || ' ' ||
-				startyear || '-' || endyear
-			) STORED
+			full_name TEXT,
     		UNIQUE (brand_id, model_id, startyear, endyear)
 		)`,
-
-		`COMMENT ON COLUMN motorcycles.full_name IS 'Generated always as: brand name + model name + years'`,
 
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_motorcycles_brand_model_start_end
 			ON motorcycles (brand_id, model_id, startyear, endyear)`,
