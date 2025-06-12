@@ -11,12 +11,6 @@ type Model struct {
 	Name    string `json:"name"`
 }
 
-type EngineSize struct {
-	ID      int `json:"id"`
-	BrandID int `json:"brand_id"`
-	SizeCC  int `json:"size_cc"`
-}
-
 type Motorcycle struct {
 	ID           int     `json:"id"`
 	BrandID      int     `json:"brand_id"`
@@ -34,4 +28,16 @@ type Product struct {
 	Description *string `json:"description,omitempty"`
 	Brand       *string `json:"brand,omitempty"`
 	IsUniversal bool    `json:"is_universal"`
+}
+
+type Category struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Path  string `json:"path,omitempty"`
+	Level int    `json:"level"`
+}
+
+type ModelYearRange struct {
+	StartYear int `json:"startyear"`
+	EndYear   int `json:"endyear"`
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -31,12 +32,10 @@ func main() {
 	router := mux.NewRouter()
 	router.HandleFunc("/brands", getBrandsHandler(db)).Methods("GET")
 	router.HandleFunc("/brands/{brand}/models", getModelsByBrandHandler(db)).Methods("GET")
-	router.HandleFunc("/brands/{brand}/products", getProductsByBrandHandler(db)).Methods("GET")
-	router.HandleFunc("/brands/{brand}/models/{model}/engine-sizes", getEngineSizesHandler(db)).Methods("GET")
-	router.HandleFunc("/brands/{brand}/models/{model}/products", getProductsByBrandModelHandler(db)).Methods("GET")
-	router.HandleFunc("/brands/{brand}/models/{model}/engine-sizes/{engine_size}/years", getYearsHandler(db)).Methods("GET")
-	router.HandleFunc("/brands/{brand}/models/{model}/engine-sizes/{engine_size}/products", getProductsByBrandModelEngineSizeHandler(db)).Methods("GET")
-	router.HandleFunc("/brands/{brand}/models/{model}/engine-sizes/{engine_size}/years/{year}/products", getProductsHandler(db)).Methods("GET")	
+	router.HandleFunc("/brands/{brand}/models/{model}/years", getYearsHandler(db)).Methods("GET")
+	router.HandleFunc("/categories", getCategoriesHandler(db)).Methods("GET")
+
+	router.HandleFunc("/products", getFilteredProductsHandler(db)).Methods("GET")
 
 	router.HandleFunc("/upload", uploadFileHandler(db)).Methods("POST")
 
@@ -48,7 +47,7 @@ func main() {
 }
 
 func enableCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set CORS headers
 		w.Header().Set("Access-Control-Allow-Origin", "*") // Allow any origin
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST")
@@ -61,7 +60,7 @@ func enableCORS(next http.Handler) http.Handler {
 		}
 
 		// Pass down the request to the next middleware (or final header)
-		next.ServeHTTP(w,r)
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -71,15 +70,6 @@ func createSchema(db *sql.DB) error {
 			id SERIAL PRIMARY KEY,
 			name VARCHAR(100) UNIQUE NOT NULL
 		)`,
-
-		`CREATE TABLE IF NOT EXISTS engine_sizes (
-			id SERIAL PRIMARY KEY,
-			brand_id INTEGER NOT NULL REFERENCES brands(id),
-			size_cc INTEGER NOT NULL
-		)`,
-
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_sizes_brand_id_size_cc
-			ON engine_sizes (brand_id, size_cc)`,
 
 		`CREATE TABLE IF NOT EXISTS models (
 			id SERIAL PRIMARY KEY,
@@ -100,25 +90,31 @@ func createSchema(db *sql.DB) error {
     		id VARCHAR(50) PRIMARY KEY,
     		name VARCHAR(200) NOT NULL,
     		category_id INTEGER NOT NULL REFERENCES categories(id),
-    		description TEXT DEFAULT,
+    		description TEXT DEFAULT '',
     		brand VARCHAR(100),
     		is_universal BOOLEAN DEFAULT FALSE
-		);`,
-
-		`CREATE TABLE IF NOT EXISTS motorcycles (
-			id SERIAL PRIMARY KEY,
-			brand_id INTEGER NOT NULL REFERENCES brands(id),
-			model_id INTEGER NOT NULL REFERENCES models(id),
-			engine_size_id INTEGER NOT NULL REFERENCES engine_sizes(id),
-			startyear INTEGER NOT NULL,
-			endyear INTEGER NOT NULL,
-			full_name VARCHAR(200)
 		)`,
 
-		`COMMENT ON COLUMN motorcycles.full_name IS 'Generated always as: brand name + model name + engine size + years'`,
+		`CREATE INDEX IF NOT EXISTS idx_products_is_universal ON products(is_universal)`,
 
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_motorcycles_brand_model_engine_start_end
-			ON motorcycles (brand_id, model_id, engine_size_id, startyear, endyear)`,
+		`CREATE TABLE IF NOT EXISTS motorcycles (
+    		id SERIAL PRIMARY KEY,
+    		brand_id INTEGER NOT NULL REFERENCES brands(id),
+    		model_id INTEGER NOT NULL REFERENCES models(id),
+    		startyear INTEGER NOT NULL,
+    		endyear INTEGER NOT NULL,
+    		full_name TEXT GENERATED ALWAYS AS (
+				(SELECT b.name FROM brands b WHERE b.id = brand_id) || ' ' ||
+				(SELECT m.name FROM models m WHERE m.id = model_id) || ' ' ||
+				startyear || '-' || endyear
+			) STORED
+    		UNIQUE (brand_id, model_id, startyear, endyear)
+		)`,
+
+		`COMMENT ON COLUMN motorcycles.full_name IS 'Generated always as: brand name + model name + years'`,
+
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_motorcycles_brand_model_start_end
+			ON motorcycles (brand_id, model_id, startyear, endyear)`,
 
 		`CREATE TABLE IF NOT EXISTS product_compatibility (
 			product_id VARCHAR(50) NOT NULL REFERENCES products(id),
@@ -136,64 +132,11 @@ func createSchema(db *sql.DB) error {
 }
 
 func jsonContentTypeMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set JSON Content-Type
 		w.Header().Set("Content-Type", "application/json")
-		next.ServeHTTP(w,r)
+		next.ServeHTTP(w, r)
 	})
-}
-
-// get product for specific bike
-func getProductsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		brand := vars["brand"]
-		model := vars["model"]
-		engineSize := vars["engine_size"]
-		yearStr := vars["year"]
-
-		year, err := strconv.Atoi(yearStr)
-		if err != nil {
-			http.Error(w, "Invalid year format", http.StatusBadRequest)
-			return
-		}
-
-		query := `
-			SELECT p.id, p.name, p.category_id, p.description, p.brand, p.is_universal
-			FROM products p
-			JOIN product_compatibility pc ON p.id = pc.product_id
-			JOIN motorcycles m ON pc.motorcycle_id = m.id
-			JOIN brands b ON m.brand_id = b.id
-			JOIN models mo ON m.model_id = mo.id
-			JOIN engine_sizes es ON m.engine_size_id = es.id
-			WHERE b.name = $1 AND mo.name = $2 AND es.size = $3 AND m.startyear <= $4 AND m.endyear >= $4
-		`
-
-		rows, err := db.Query(query, brand, model, engineSize, year)
-		if err != nil {
-			http.Error(w, "Database query error", http.StatusInternalServerError)
-			return
-		}
-		defer rows.Close()
-
-		var products []Product
-		for rows.Next() {
-			var p Product
-			if err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.Brand, &p.IsUniversal); err != nil {
-				http.Error(w, "Error scanning product", http.StatusInternalServerError)
-				return
-			}
-			products = append(products, p)
-		}
-
-		if err := rows.Err(); err != nil {
-			http.Error(w, "Error reading products", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(products)
-	}
 }
 
 func getBrandsHandler(db *sql.DB) http.HandlerFunc {
@@ -227,9 +170,9 @@ func getModelsByBrandHandler(db *sql.DB) http.HandlerFunc {
 
 		query := `
 			SELECT mo.id, mo.name 
-			FROM models mo
-			JOIN brands b ON mo.brand_id = b.id
-			WHERE b.name = $1
+			FROM models mo 
+			JOIN brands b ON mo.brand_id = b.id 
+			WHERE b.name = $1 
 			ORDER BY mo.name
 		`
 
@@ -255,177 +198,22 @@ func getModelsByBrandHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func getProductsByBrandHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		brand := vars["brand"]
-
-		query := `
-			SELECT DISTINCT p.id, p.name, p.category_id, p.description, p.brand, p.is_universal
-			FROM products p
-			JOIN product_compatibility pc ON p.id = pc.product_id
-			JOIN motorcycles m ON pc.motorcycle_id = m.id
-			JOIN brands b ON m.brand_id = b.id
-			WHERE b.name = $1
-		`
-
-		rows, err := db.Query(query, brand)
-		if err != nil {
-			http.Error(w, "Database query error", http.StatusInternalServerError)
-			return
-		}
-		defer rows.Close()
-
-		var products []Product
-		for rows.Next() {
-			var p Product
-			if err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.Brand, &p.IsUniversal); err != nil {
-				http.Error(w, "Error scanning product", http.StatusInternalServerError)
-				return
-			}
-			products = append(products, p)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(products)
-	}
-}
-
-func getProductsByBrandModelHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		brand := vars["brand"]
-		model := vars["model"]
-
-		query := `
-			SELECT DISTINCT p.id, p.name, p.category_id, p.description, p.brand, p.is_universal
-			FROM products p
-			JOIN product_compatibility pc ON p.id = pc.product_id
-			JOIN motorcycles m ON pc.motorcycle_id = m.id
-			JOIN brands b ON m.brand_id = b.id
-			JOIN models mo ON m.model_id = mo.id
-			WHERE b.name = $1 AND mo.name = $2
-		`
-
-		rows, err := db.Query(query, brand, model)
-		if err != nil {
-			http.Error(w, "Database query error", http.StatusInternalServerError)
-			return
-		}
-		defer rows.Close()
-
-		var products []Product
-		for rows.Next() {
-			var p Product
-			if err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.Brand, &p.IsUniversal); err != nil {
-				http.Error(w, "Error scanning product", http.StatusInternalServerError)
-				return
-			}
-			products = append(products, p)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(products)
-	}
-}
-
-func getProductsByBrandModelEngineSizeHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		brand := vars["brand"]
-		model := vars["model"]
-		engineSize := vars["engine_size"]
-
-		query := `
-			SELECT DISTINCT p.id, p.name, p.category_id, p.description, p.brand, p.is_universal
-			FROM products p
-			JOIN product_compatibility pc ON p.id = pc.product_id
-			JOIN motorcycles m ON pc.motorcycle_id = m.id
-			JOIN brands b ON m.brand_id = b.id
-			JOIN models mo ON m.model_id = mo.id
-			JOIN engine_sizes es ON m.engine_size_id = es.id
-			WHERE b.name = $1 AND mo.name = $2 AND es.size = $3
-		`
-
-		rows, err := db.Query(query, brand, model, engineSize)
-		if err != nil {
-			http.Error(w, "Database query error", http.StatusInternalServerError)
-			return
-		}
-		defer rows.Close()
-
-		var products []Product
-		for rows.Next() {
-			var p Product
-			if err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.Brand, &p.IsUniversal); err != nil {
-				http.Error(w, "Error scanning product", http.StatusInternalServerError)
-				return
-			}
-			products = append(products, p)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(products)
-	}
-}
-
-
-func getEngineSizesHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		brand := vars["brand"]
-		model := vars["model"]
-
-		query := `
-			SELECT DISTINCT es.id, es.size 
-			FROM motorcycles m
-			JOIN brands b ON m.brand_id = b.id
-			JOIN models mo ON m.model_id = mo.id
-			JOIN engine_sizes es ON m.engine_size_id = es.id
-			WHERE b.name = $1 AND mo.name = $2
-			ORDER BY es.size
-		`
-
-		rows, err := db.Query(query, brand, model)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer rows.Close()
-
-		var sizes []EngineSize
-		for rows.Next() {
-			var e EngineSize
-			if err := rows.Scan(&e.ID, &e.SizeCC); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			sizes = append(sizes, e)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(sizes)
-	}
-}
-
 func getYearsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		brand := vars["brand"]
 		model := vars["model"]
-		engineSize := vars["engine_size"]
 
 		query := `
 			SELECT DISTINCT generate_series(m.startyear, m.endyear) AS year
 			FROM motorcycles m
 			JOIN brands b ON m.brand_id = b.id
 			JOIN models mo ON m.model_id = mo.id
-			JOIN engine_sizes es ON m.engine_size_id = es.id
-			WHERE b.name = $1 AND mo.name = $2 AND es.size = $3
+			WHERE b.name ILIKE $1 AND mo.name ILIKE $2
 			ORDER BY year
 		`
 
-		rows, err := db.Query(query, brand, model, engineSize)
+		rows, err := db.Query(query, brand, model)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -447,6 +235,111 @@ func getYearsHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+func getCategoriesHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rows, err := db.Query(`
+			SELECT id, name, path, level
+			FROM categories
+			WHERE parent_id IS NULL
+			ORDER BY name
+		`)
+		if err != nil {
+			http.Error(w, "Database query error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var categories []Category
+		for rows.Next() {
+			var c Category
+			if err := rows.Scan(&c.ID, &c.Name, &c.Path, &c.Level); err != nil {
+				http.Error(w, "Error scanning row", http.StatusInternalServerError)
+				return
+			}
+			categories = append(categories, c)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(categories)
+	}
+}
+
+func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		queryParams := r.URL.Query()
+		brand := queryParams.Get("brand")
+		model := queryParams.Get("model")
+		yearStr := queryParams.Get("year")
+		category := queryParams.Get("category")
+
+		var year int
+		var err error
+		if yearStr != "" {
+			year, err = strconv.Atoi(yearStr)
+			if err != nil {
+				http.Error(w, "Invalid year format", http.StatusBadRequest)
+				return
+			}
+		}
+
+		baseQuery := `
+		SELECT p.id, p.name, p.category_id, p.description, p.brand, p.is_universal
+		FROM products p
+		LEFT JOIN product_compatibility pc ON p.id = pc.product_id
+		LEFT JOIN motorcycles m ON pc.motorcycle_id = m.id
+		LEFT JOIN brands b ON m.brand_id = b.id
+		LEFT JOIN models mo ON m.model_id = mo.id
+		LEFT JOIN categories c ON p.category_id = c.id
+		WHERE (p.is_universal = TRUE`
+
+		var args []interface{}
+		argPos := 1
+
+		if brand != "" {
+			baseQuery += fmt.Sprintf(" OR b.name ILIKE $%d", argPos)
+			args = append(args, brand)
+			argPos++
+		}
+		if model != "" {
+			baseQuery += fmt.Sprintf(" AND mo.name ILIKE $%d", argPos)
+			args = append(args, model)
+			argPos++
+		}
+		if yearStr != "" {
+			baseQuery += fmt.Sprintf(" AND m.startyear <= $%d AND m.endyear >= $%d", argPos, argPos)
+			args = append(args, year)
+			argPos++
+		}
+		if category != "" {
+			baseQuery += fmt.Sprintf(" AND c.name ILIKE $%d", argPos)
+			args = append(args, category)
+			argPos++
+		}
+
+		baseQuery += ")"
+
+		rows, err := db.Query(baseQuery, args...)
+		if err != nil {
+			http.Error(w, "Database query error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var products []Product
+		for rows.Next() {
+			var p Product
+			if err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.Brand, &p.IsUniversal); err != nil {
+				http.Error(w, "Error scanning product", http.StatusInternalServerError)
+				return
+			}
+			products = append(products, p)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(products)
+	}
+}
+
 func uploadFileHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := r.ParseMultipartForm(10 << 20) // Max 10MB
@@ -465,6 +358,6 @@ func uploadFileHandler(db *sql.DB) http.HandlerFunc {
 		}
 		defer file.Close()
 
-		csvreader(file, db, rootCategory);
+		csvreader(file, db, rootCategory)
 	}
 }

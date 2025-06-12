@@ -8,15 +8,11 @@ export type Model = {
   name: string;
 };
 
-export type EngineSize = {
-  id: number;
-  sizeCC: number;
-};
-
 export type Category = {
   id: number;
   parent?: string;
-  category: string;
+  name: string;
+  path?: string;
 };
 
 export type ModelYear = {
@@ -27,7 +23,6 @@ export type ModelYear = {
 export type UserInput = {
   brand: Brand | undefined;
   model?: Model;
-  engineSize?: EngineSize;
   year?: ModelYear;
   category?: Category;
 };
