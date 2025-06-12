@@ -20,13 +20,44 @@ export default function Home() {
 
   // Fetching brands
   useEffect(() => {
-    getBrands();
+    async function fetchBrands() {
+      const { data, error } = await getBrands();
+      if (error !== null) {
+        console.error(error);
+        return;
+      }
+
+      console.log(data);
+    }
+
+    async function fetchCategories() {
+      const { data, error } = await getCategories();
+      if (error !== null) {
+        console.error(error);
+        return;
+      }
+
+      console.log(data);
+    }
+
+    fetchBrands();
+    fetchCategories();
   }, []);
 
   useEffect(() => {
-    if (!userInput.brand) return;
+    async function fetchModels() {
+      if (!userInput.brand) return;
+      const { data, error } = await getModelsByBrand(userInput.brand.name);
 
-    getModelsByBrand(userInput.brand.name);
+      if (error !== null) {
+        console.error(error);
+        return;
+      }
+
+      console.log(data);
+    }
+
+    fetchModels();
 
     setUserInput({
       brand: userInput.brand,
@@ -34,9 +65,18 @@ export default function Home() {
   }, [userInput.brand]);
 
   useEffect(() => {
-    if (!userInput.brand || !userInput.model) return;
+    async function fetchYears() {
+      if (!userInput.brand || !userInput.model) return;
+      const { data, error } = await getYears(userInput.brand.name, userInput.model.name);
+      if (error !== null) {
+        console.error(error);
+        return;
+      }
 
-    getYears(userInput.brand.name, userInput.model.name);
+      console.log(data);
+    }
+
+    fetchYears();
 
     setUserInput({
       brand: userInput.brand,
@@ -47,7 +87,6 @@ export default function Home() {
   return (
     <>
       <div className="flex flex-col items-center justify-center w-full gap-8 py-6">
-        <Image src={"/EMX.png"} alt="EMX logo" width={1138} height={621} priority className="w-1/8" />
         <Card className="w-full max-w-6xl">
           <CardHeader>
             <CardTitle>Sök efter delar</CardTitle>
