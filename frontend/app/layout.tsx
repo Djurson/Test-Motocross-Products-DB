@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Asap } from "next/font/google";
 import "./globals.css";
 import { NavigationMenuDemo } from "@/components/navigation";
+import { Toaster } from "@/components/ui/sonner";
 
 const geist = Asap({
   subsets: ["latin"],
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className={`${geist.className} antialiased w-full min-h-dvh flex flex-col justify-start items-center`}>
         <NavigationMenuDemo />
         {children}
+        <Toaster />
       </body>
     </html>
   );

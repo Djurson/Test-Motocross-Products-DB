@@ -16,15 +16,15 @@ export type Category = {
 };
 
 export type ModelYear = {
-  startYear: number;
-  endYear: number;
+  startyear: number;
+  endyear: number;
 };
 
 export type UserInput = {
-  brand: Brand | undefined;
-  model?: Model;
-  year?: ModelYear;
-  category?: Category;
+  brand?: string;
+  model?: string;
+  year?: string;
+  category?: string;
 };
 
 export type Product = {

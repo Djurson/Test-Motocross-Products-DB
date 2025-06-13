@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -117,8 +118,9 @@ func createSchema(db *sql.DB) error {
 		)`,
 	}
 
-	for _, q := range queries {
+	for i, q := range queries {
 		if _, err := db.Exec(q); err != nil {
+			log.Printf("Schema error on query %d: %v\nSQL: %s", i, err, q)
 			return err
 		}
 	}
@@ -199,12 +201,13 @@ func getYearsHandler(db *sql.DB) http.HandlerFunc {
 		model := vars["model"]
 
 		query := `
-			SELECT DISTINCT generate_series(m.startyear, m.endyear) AS year
+			SELECT m.startyear, m.endyear
 			FROM motorcycles m
 			JOIN brands b ON m.brand_id = b.id
 			JOIN models mo ON m.model_id = mo.id
 			WHERE b.name ILIKE $1 AND mo.name ILIKE $2
-			ORDER BY year
+			GROUP BY m.startyear, m.endyear
+			ORDER BY m.startyear
 		`
 
 		rows, err := db.Query(query, brand, model)
@@ -214,18 +217,17 @@ func getYearsHandler(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		var years []int
+		var ranges []ModelYearRange
 		for rows.Next() {
-			var year int
-			if err := rows.Scan(&year); err != nil {
+			var r ModelYearRange
+			if err := rows.Scan(&r.StartYear, &r.EndYear); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			years = append(years, year)
+			ranges = append(ranges, r)
 		}
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(years)
+		json.NewEncoder(w).Encode(ranges)
 	}
 }
 
@@ -238,6 +240,7 @@ func getCategoriesHandler(db *sql.DB) http.HandlerFunc {
 			ORDER BY name
 		`)
 		if err != nil {
+			log.Printf("Database query error: %v", err) // <-- logga felet
 			http.Error(w, "Database query error", http.StatusInternalServerError)
 			return
 		}
@@ -247,6 +250,7 @@ func getCategoriesHandler(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var c Category
 			if err := rows.Scan(&c.ID, &c.Name, &c.Path, &c.Level); err != nil {
+				log.Printf("Error scanning row: %v", err) // <-- logga felet
 				http.Error(w, "Error scanning row", http.StatusInternalServerError)
 				return
 			}
@@ -266,10 +270,22 @@ func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
 		yearStr := queryParams.Get("year")
 		category := queryParams.Get("category")
 
-		var year int
+		var startyear, endyear int
 		var err error
 		if yearStr != "" {
-			year, err = strconv.Atoi(yearStr)
+			yearsSplit := strings.Split(yearStr, "-")
+			if len(yearsSplit) != 2 {
+				http.Error(w, "Invalid year range format", http.StatusBadRequest)
+				return
+			}
+
+			startyear, err = strconv.Atoi(yearsSplit[0])
+			if err != nil {
+				http.Error(w, "Invalid year format", http.StatusBadRequest)
+				return
+			}
+
+			endyear, err = strconv.Atoi(yearsSplit[1])
 			if err != nil {
 				http.Error(w, "Invalid year format", http.StatusBadRequest)
 				return
@@ -300,9 +316,9 @@ func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
 			argPos++
 		}
 		if yearStr != "" {
-			baseQuery += fmt.Sprintf(" AND m.startyear <= $%d AND m.endyear >= $%d", argPos, argPos)
-			args = append(args, year)
-			argPos++
+			baseQuery += fmt.Sprintf(" AND m.startyear <= $%d AND m.endyear >= $%d", argPos, argPos+1)
+			args = append(args, startyear, endyear)
+			argPos += 2
 		}
 		if category != "" {
 			baseQuery += fmt.Sprintf(" AND c.name ILIKE $%d", argPos)
@@ -336,21 +352,29 @@ func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
 
 func uploadFileHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		err := r.ParseMultipartForm(10 << 20) // Max 10MB
+		err := r.ParseMultipartForm(30 << 20)
 		if err != nil {
 			http.Error(w, "Could not parse multipart form", http.StatusBadRequest)
 			return
 		}
 
-		vars := mux.Vars(r)
-		rootCategory := vars["category"]
+		rootCategory := r.FormValue("category")
+		if rootCategory == "" {
+			http.Error(w, "Category is required", http.StatusBadRequest)
+			return
+		}
 
-		file, _, err := r.FormFile("file")
+		file, handler, err := r.FormFile("file")
 		if err != nil {
 			http.Error(w, "Could not get file", http.StatusBadRequest)
 			return
 		}
 		defer file.Close()
+
+		if !strings.HasSuffix(strings.ToLower(handler.Filename), ".csv") {
+			http.Error(w, "Only .csv files allowed", http.StatusBadRequest)
+			return
+		}
 
 		csvreader(file, db, rootCategory)
 	}

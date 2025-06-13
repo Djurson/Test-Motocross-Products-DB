@@ -4,10 +4,9 @@ import { DropDown } from "@/components/dropdown";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Result, tryCatch } from "@/utils/trycatch";
-import { Product, UserInput } from "@/utils/types";
+import { Brand, Category, Model, ModelYear, Product, UserInput } from "@/utils/types";
 import axios from "axios";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 
 export default function Home() {
@@ -18,6 +17,10 @@ export default function Home() {
     category: undefined,
   });
 
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [models, setModels] = useState<Model[]>([]);
+  const [years, setYears] = useState<ModelYear[]>([]);
   // Fetching brands
   useEffect(() => {
     async function fetchBrands() {
@@ -27,7 +30,7 @@ export default function Home() {
         return;
       }
 
-      console.log(data);
+      setBrands(data);
     }
 
     async function fetchCategories() {
@@ -37,7 +40,7 @@ export default function Home() {
         return;
       }
 
-      console.log(data);
+      setCategories(data);
     }
 
     fetchBrands();
@@ -47,14 +50,14 @@ export default function Home() {
   useEffect(() => {
     async function fetchModels() {
       if (!userInput.brand) return;
-      const { data, error } = await getModelsByBrand(userInput.brand.name);
+      const { data, error } = await getModelsByBrand(userInput.brand);
 
       if (error !== null) {
         console.error(error);
         return;
       }
 
-      console.log(data);
+      setModels(data);
     }
 
     fetchModels();
@@ -67,13 +70,13 @@ export default function Home() {
   useEffect(() => {
     async function fetchYears() {
       if (!userInput.brand || !userInput.model) return;
-      const { data, error } = await getYears(userInput.brand.name, userInput.model.name);
+      const { data, error } = await getYears(userInput.brand, userInput.model);
       if (error !== null) {
         console.error(error);
         return;
       }
 
-      console.log(data);
+      setYears(data);
     }
 
     fetchYears();
@@ -83,6 +86,16 @@ export default function Home() {
       model: userInput.model,
     });
   }, [userInput.brand, userInput.model]);
+
+  async function search() {
+    const { data, error } = await getFilteredProducts(userInput);
+    if (error !== null) {
+      console.error("Error when fetching products: ", error);
+      return;
+    }
+
+    console.log(data);
+  }
 
   return (
     <>
@@ -94,11 +107,51 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-5 grid-rows-1 gap-4 px-8 py-6 rounded-md bg-muted">
-              <DropDown label="Märke" placeholder="Välj märke" disabled={false} input={userInput} setInput={setUserInput} type="brand" />
-              <DropDown label="Modell" placeholder="Välj modell" disabled={userInput?.brand ? false : true} input={userInput} setInput={setUserInput} type="model" />
-              <DropDown label="Motorstorlek" placeholder="Välj motorstorlek (cc)" disabled={userInput?.model ? false : true} input={userInput} setInput={setUserInput} type="year" />
-              <DropDown label="Kategori" placeholder="Välj kategori" disabled={false} input={userInput} setInput={setUserInput} type="category" />
-              <Button className="self-end" variant="default">
+              <DropDown
+                label="Märke"
+                placeholder="Välj märke"
+                disabled={false}
+                input={userInput}
+                setInput={setUserInput}
+                type="brand"
+                data={brands}
+                getOptionLabel={(y) => y.name}
+                getOptionValue={(y) => y.name}
+              />
+              <DropDown
+                label="Modell"
+                placeholder="Välj modell"
+                disabled={userInput?.brand ? false : true}
+                input={userInput}
+                setInput={setUserInput}
+                type="model"
+                data={models}
+                getOptionLabel={(y) => y.name}
+                getOptionValue={(y) => y.name}
+              />
+              <DropDown
+                label="Motorstorlek"
+                placeholder="Välj motorstorlek (cc)"
+                disabled={userInput?.model ? false : true}
+                input={userInput}
+                setInput={setUserInput}
+                type="year"
+                data={years}
+                getOptionLabel={(y) => `${y.startyear} - ${y.endyear === 99999 ? "" : y.endyear}`}
+                getOptionValue={(y) => `${y.startyear}-${y.endyear}`}
+              />
+              <DropDown
+                label="Kategori"
+                placeholder="Välj kategori"
+                disabled={false}
+                input={userInput}
+                setInput={setUserInput}
+                type="category"
+                data={categories}
+                getOptionLabel={(y) => y.name}
+                getOptionValue={(y) => y.name}
+              />
+              <Button className="self-end" variant="default" onClick={search}>
                 Sök
               </Button>
             </div>
@@ -112,7 +165,7 @@ export default function Home() {
 /*
   Fetch products
 */
-async function getBrands(): Promise<Result<string[], Error>> {
+async function getBrands(): Promise<Result<Brand[], Error>> {
   const { data, error } = await tryCatch(axios.get("http://localhost:8000/brands"));
   if (error) {
     console.error("Error when fetching brands: ", error);
@@ -121,7 +174,7 @@ async function getBrands(): Promise<Result<string[], Error>> {
   return { data: data.data, error: null };
 }
 
-async function getModelsByBrand(brand: string): Promise<Result<string[], Error>> {
+async function getModelsByBrand(brand: string): Promise<Result<Model[], Error>> {
   const { data, error } = await tryCatch(axios.get(`http://localhost:8000/brands/${brand}/models`));
   if (error) {
     console.error("Error when fetching models by brand: ", error);
@@ -130,7 +183,7 @@ async function getModelsByBrand(brand: string): Promise<Result<string[], Error>>
   return { data: data.data, error: null };
 }
 
-async function getYears(brand: string, model: string): Promise<Result<number[], Error>> {
+async function getYears(brand: string, model: string): Promise<Result<ModelYear[], Error>> {
   const { data, error } = await tryCatch(axios.get(`http://localhost:8000/brands/${brand}/models/${model}/years`));
   if (error) {
     console.error("Error when fetching years: ", error);
@@ -139,7 +192,7 @@ async function getYears(brand: string, model: string): Promise<Result<number[], 
   return { data: data.data, error: null };
 }
 
-export async function getCategories(): Promise<Result<string[], Error>> {
+export async function getCategories(): Promise<Result<Category[], Error>> {
   const { data, error } = await tryCatch(axios.get("http://localhost:8000/categories"));
   if (error) {
     console.error("Error when fetching categories: ", error);
@@ -151,10 +204,10 @@ export async function getCategories(): Promise<Result<string[], Error>> {
 export async function getFilteredProducts(input: UserInput): Promise<Result<Product[], Error>> {
   const params = new URLSearchParams();
 
-  if (input.brand?.name) params.append("brand", input.brand.name);
-  if (input.model?.name) params.append("model", input.model.name);
-  if (input.year?.toString()) params.append("year", input.year.toString());
-  if (input.category) params.append("category", input.category.name);
+  if (input.brand) params.append("brand", input.brand);
+  if (input.model) params.append("model", input.model);
+  if (input.year) params.append("year", input.year);
+  if (input.category) params.append("category", input.category);
 
   const { data, error } = await tryCatch(axios.get(`http://localhost:8000/products?${params.toString()}`));
 

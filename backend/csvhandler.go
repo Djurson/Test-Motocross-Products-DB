@@ -4,13 +4,19 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"fmt"
+	"log"
 	"mime/multipart"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/transform"
 )
 
 func csvreader(file multipart.File, db *sql.DB, rootCategory string) {
-	reader := csv.NewReader(file)
+	decoded := transform.NewReader(file, charmap.Windows1252.NewDecoder())
+
+	reader := csv.NewReader(decoded)
 	reader.Comma = ';'
 
 	records, err := reader.ReadAll()
@@ -24,7 +30,10 @@ func csvreader(file multipart.File, db *sql.DB, rootCategory string) {
 		return
 	}
 
-	insertFromCSV(records, db, rootCategory)
+	err = insertFromCSV(records, db, rootCategory)
+	if err != nil {
+		log.Println("Error when inserting: ", err)
+	}
 }
 
 func insertFromCSV(records [][]string, db *sql.DB, rootCategory string) error {
@@ -33,7 +42,10 @@ func insertFromCSV(records [][]string, db *sql.DB, rootCategory string) error {
 		return fmt.Errorf("kunde inte skapa/hämta root kategori: %w", err)
 	}
 
-	for _, row := range records {
+	for i, row := range records {
+		if i == 0 {
+			continue
+		}
 		subCategoryName := row[0]
 		brandName := row[4]
 		modelName := row[5]
@@ -129,12 +141,11 @@ func parseModelYears(modYearStr string) (int, int) {
 
 func getOrCreateBrand(db *sql.DB, brandName string) (int, error) {
 	var id int
-	err := db.QueryRow(`
-		INSERT INTO brands(name)
-		VALUES($1)
-		ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-		RETURNING id
-	`, brandName).Scan(&id)
+	err := db.QueryRow(`INSERT INTO brands (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING id`, brandName).Scan(&id)
+	if err == sql.ErrNoRows {
+		// raden fanns redan, hämta den manuellt
+		err = db.QueryRow(`SELECT id FROM brands WHERE name = $1`, brandName).Scan(&id)
+	}
 	return id, err
 }
 
@@ -153,12 +164,12 @@ func getOrCreateMotorcycle(db *sql.DB, brandID int, modelID int, startYear int, 
 	var id int
 
 	query := `
-        INSERT INTO motorcycles (brand_id, model_id, startyear, endyear, fullname)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (brand_id, model_id, startyear, endyear, fullname)
-        DO UPDATE SET startyear = EXCLUDED.startyear
-        RETURNING id
-    `
+    	INSERT INTO motorcycles (brand_id, model_id, startyear, endyear, full_name)
+    	VALUES ($1, $2, $3, $4, $5)
+    	ON CONFLICT (brand_id, model_id, startyear, endyear)
+    	DO UPDATE SET full_name = EXCLUDED.full_name
+    	RETURNING id
+	`
 
 	err := db.QueryRow(query, brandID, modelID, startYear, endYear, fullname).Scan(&id)
 	return id, err

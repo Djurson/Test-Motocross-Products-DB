@@ -1,5 +1,7 @@
 package main
 
+import "database/sql"
+
 type Brand struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
@@ -31,10 +33,10 @@ type Product struct {
 }
 
 type Category struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Path  string `json:"path,omitempty"`
-	Level int    `json:"level"`
+	ID    int            `json:"id"`
+	Name  string         `json:"name"`
+	Path  sql.NullString `json:"path"`
+	Level sql.NullInt32  `json:"level"`
 }
 
 type ModelYearRange struct {
