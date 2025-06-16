@@ -52,6 +52,7 @@ func insertFromCSV(records [][]string, db *sql.DB, rootCategory string) error {
 		modYears := row[6]
 		productCode := "KT" + row[9]
 		productName := row[10]
+		companyName := row[18]
 
 		// 1. Skapa/hämta underkategori med parent = "fjädrar"
 		subCatID, err := getOrCreateCategoryWithParent(db, subCategoryName, &rootCatID)
@@ -62,7 +63,7 @@ func insertFromCSV(records [][]string, db *sql.DB, rootCategory string) error {
 		isUniversal := brandName == "" || modelName == "" || modYears == ""
 
 		// 6. Skapa produkt
-		productID, err := getOrCreateProduct(db, productCode, productName, subCatID, brandName, isUniversal)
+		productID, err := getOrCreateProduct(db, productCode, productName, subCatID, brandName, isUniversal, companyName)
 		if err != nil {
 			return fmt.Errorf("kunde inte skapa/hämta produkt: %w", err)
 		}
@@ -99,23 +100,56 @@ func insertFromCSV(records [][]string, db *sql.DB, rootCategory string) error {
 
 func getOrCreateCategoryWithParent(db *sql.DB, name string, parentID *int) (int, error) {
 	var id int
+
+	// Försök hämta kategori först
 	if parentID == nil {
 		err := db.QueryRow(`SELECT id FROM categories WHERE name = $1 AND parent_id IS NULL`, name).Scan(&id)
 		if err == sql.ErrNoRows {
+			// Skapa kategori utan parent
 			err = db.QueryRow(`INSERT INTO categories(name, parent_id) VALUES($1, NULL) RETURNING id`, name).Scan(&id)
+			if err != nil {
+				return 0, err
+			}
+			// Uppdatera path och level för rotkategori
+			path := fmt.Sprintf("/%d/", id)
+			level := 0
+			_, err = db.Exec(`UPDATE categories SET path = $1, level = $2 WHERE id = $3`, path, level, id)
+			if err != nil {
+				return 0, err
+			}
 		}
 		return id, err
 	} else {
-		err := db.QueryRow(`SELECT id FROM categories WHERE name = $1 AND parent_id = $2`, name, *parentID).Scan(&id)
+		// Hämta förälder path och level
+		var parentPath string
+		var parentLevel int
+		err := db.QueryRow(`SELECT path, level FROM categories WHERE id = $1`, *parentID).Scan(&parentPath, &parentLevel)
+		if err != nil {
+			return 0, err
+		}
+
+		err = db.QueryRow(`SELECT id FROM categories WHERE name = $1 AND parent_id = $2`, name, *parentID).Scan(&id)
 		if err == sql.ErrNoRows {
+			// Skapa kategori med parent
 			err = db.QueryRow(`INSERT INTO categories(name, parent_id) VALUES($1, $2) RETURNING id`, name, *parentID).Scan(&id)
+			if err != nil {
+				return 0, err
+			}
+
+			// Uppdatera path och level baserat på förälder
+			path := fmt.Sprintf("%s%d/", parentPath, id)
+			level := parentLevel + 1
+			_, err = db.Exec(`UPDATE categories SET path = $1, level = $2 WHERE id = $3`, path, level, id)
+			if err != nil {
+				return 0, err
+			}
 		}
 		return id, err
 	}
 }
 
 func parseModelYears(modYearStr string) (int, int) {
-	var startyear, endyear int = 0, 99999
+	var startyear, endyear int = 0, 9999
 	var err error
 
 	if strings.Contains(modYearStr, ">") {
@@ -175,17 +209,17 @@ func getOrCreateMotorcycle(db *sql.DB, brandID int, modelID int, startYear int, 
 	return id, err
 }
 
-func getOrCreateProduct(db *sql.DB, productCode, productName string, subCatID int, brandName string, isUniversal bool) (string, error) {
+func getOrCreateProduct(db *sql.DB, productCode, productName string, subCatID int, brandName string, isUniversal bool, companyName string) (string, error) {
 	var id string
 
 	query := `
-		INSERT INTO products(id, name, category_id, description, brand, is_universal)
-		VALUES($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO UPDATE 
-		SET name = EXCLUDED.name, is_universal = EXCLUDED.is_universal
-		RETURNING id;
+	INSERT INTO products(id, name, category_id, description, for_brand, is_universal, importer_name)
+	VALUES($1, $2, $3, $4, $5, $6, $7)
+	ON CONFLICT (id) DO UPDATE 
+	SET name = EXCLUDED.name, is_universal = EXCLUDED.is_universal
+	RETURNING id;
 	`
-	err := db.QueryRow(query, productCode, productName, subCatID, "", brandName, isUniversal).Scan(&id)
+	err := db.QueryRow(query, productCode, productName, subCatID, companyName+" - "+productName, brandName, isUniversal, companyName).Scan(&id)
 	return id, err
 }
 

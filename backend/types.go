@@ -14,22 +14,22 @@ type Model struct {
 }
 
 type Motorcycle struct {
-	ID           int     `json:"id"`
-	BrandID      int     `json:"brand_id"`
-	ModelID      int     `json:"model_id"`
-	EngineSizeID int     `json:"engine_size_id"`
-	StartYear    int     `json:"start_year"`
-	EndYear      int     `json:"end_year"`
-	FullName     *string `json:"full_name,omitempty"`
+	ID        int    `json:"id"`
+	Brand     string `json:"brand"`
+	Model     string `json:"model"`
+	StartYear int    `json:"start_year"`
+	EndYear   int    `json:"end_year"`
 }
 
 type Product struct {
-	ID          int     `json:"id"`
-	Name        string  `json:"name" validate:"required"`
-	CategoryID  int     `json:"category_id" validate:"required"`
-	Description *string `json:"description,omitempty"`
-	Brand       *string `json:"brand,omitempty"`
-	IsUniversal bool    `json:"is_universal"`
+	ID           int          `json:"id"`
+	Name         string       `json:"name"`
+	CategoryID   int          `json:"category_id"`
+	Description  string       `json:"description"`
+	ForBrand     string       `json:"for_brand"`
+	IsUniversal  bool         `json:"is_universal"`
+	Motorcycles  []Motorcycle `json:"motorcycles"`
+	ImporterName string       `json:"importer_name"`
 }
 
 type Category struct {

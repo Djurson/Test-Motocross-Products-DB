@@ -1,6 +1,7 @@
 "use client";
 
 import { DropDown } from "@/components/dropdown";
+import ProductTable from "@/components/producttable";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Result, tryCatch } from "@/utils/trycatch";
@@ -21,6 +22,9 @@ export default function Home() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [years, setYears] = useState<ModelYear[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+
+  console.log(products);
   // Fetching brands
   useEffect(() => {
     async function fetchBrands() {
@@ -50,7 +54,7 @@ export default function Home() {
   useEffect(() => {
     async function fetchModels() {
       if (!userInput.brand) return;
-      const { data, error } = await getModelsByBrand(userInput.brand);
+      const { data, error } = await getModelsByBrand(userInput.brand.name);
 
       if (error !== null) {
         console.error(error);
@@ -70,7 +74,7 @@ export default function Home() {
   useEffect(() => {
     async function fetchYears() {
       if (!userInput.brand || !userInput.model) return;
-      const { data, error } = await getYears(userInput.brand, userInput.model);
+      const { data, error } = await getYears(userInput.brand.name, userInput.model.name);
       if (error !== null) {
         console.error(error);
         return;
@@ -94,7 +98,7 @@ export default function Home() {
       return;
     }
 
-    console.log(data);
+    setProducts(data);
   }
 
   return (
@@ -137,7 +141,7 @@ export default function Home() {
                 setInput={setUserInput}
                 type="year"
                 data={years}
-                getOptionLabel={(y) => `${y.startyear} - ${y.endyear === 99999 ? "" : y.endyear}`}
+                getOptionLabel={(y) => `${y.startyear} - ${y.endyear === 9999 ? "" : y.endyear}`}
                 getOptionValue={(y) => `${y.startyear}-${y.endyear}`}
               />
               <DropDown
@@ -149,7 +153,7 @@ export default function Home() {
                 type="category"
                 data={categories}
                 getOptionLabel={(y) => y.name}
-                getOptionValue={(y) => y.name}
+                getOptionValue={(y) => y.id.toString()}
               />
               <Button className="self-end" variant="default" onClick={search}>
                 Sök
@@ -157,6 +161,7 @@ export default function Home() {
             </div>
           </CardContent>
         </Card>
+        <ProductTable products={products} />
       </div>
     </>
   );
@@ -201,13 +206,13 @@ export async function getCategories(): Promise<Result<Category[], Error>> {
   return { data: data.data, error: null };
 }
 
-export async function getFilteredProducts(input: UserInput): Promise<Result<Product[], Error>> {
+async function getFilteredProducts(input: UserInput): Promise<Result<Product[], Error>> {
   const params = new URLSearchParams();
 
-  if (input.brand) params.append("brand", input.brand);
-  if (input.model) params.append("model", input.model);
-  if (input.year) params.append("year", input.year);
-  if (input.category) params.append("category", input.category);
+  if (input.brand) params.append("brand", input.brand.name);
+  if (input.model) params.append("model", input.model.name);
+  if (input.year) params.append("year", `${input.year.startyear}-${input.year.endyear.toString().slice(0, 4)}`);
+  if (input.category) params.append("category_id", input.category.id.toString());
 
   const { data, error } = await tryCatch(axios.get(`http://localhost:8000/products?${params.toString()}`));
 

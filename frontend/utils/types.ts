@@ -21,17 +21,27 @@ export type ModelYear = {
 };
 
 export type UserInput = {
-  brand?: string;
-  model?: string;
-  year?: string;
-  category?: string;
+  brand?: Brand;
+  model?: Model;
+  year?: ModelYear;
+  category?: Category;
+};
+
+export type Motorcycle = {
+  id: number;
+  brand: string;
+  model: string;
+  start_year: number;
+  end_year: number;
 };
 
 export type Product = {
   id: number;
   name: string;
-  category_id: number;
+  for_brand: string;
   description: string;
-  brand: string;
+  category_id: number;
   is_universal: boolean;
+  motorcycles: Motorcycle[];
+  importer_name: string;
 };

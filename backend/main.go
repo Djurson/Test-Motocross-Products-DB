@@ -92,8 +92,9 @@ func createSchema(db *sql.DB) error {
     		name VARCHAR(200) NOT NULL,
     		category_id INTEGER NOT NULL REFERENCES categories(id),
     		description TEXT DEFAULT '',
-    		brand VARCHAR(100),
-    		is_universal BOOLEAN DEFAULT FALSE
+    		for_brand VARCHAR(100),
+    		is_universal BOOLEAN DEFAULT FALSE,
+			importer_name VARCHAR(100)
 		)`,
 
 		`CREATE INDEX IF NOT EXISTS idx_products_is_universal ON products(is_universal)`,
@@ -268,7 +269,7 @@ func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
 		brand := queryParams.Get("brand")
 		model := queryParams.Get("model")
 		yearStr := queryParams.Get("year")
-		category := queryParams.Get("category")
+		categoryIDStr := queryParams.Get("category_id")
 
 		var startyear, endyear int
 		var err error
@@ -278,13 +279,11 @@ func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
 				http.Error(w, "Invalid year range format", http.StatusBadRequest)
 				return
 			}
-
 			startyear, err = strconv.Atoi(yearsSplit[0])
 			if err != nil {
 				http.Error(w, "Invalid year format", http.StatusBadRequest)
 				return
 			}
-
 			endyear, err = strconv.Atoi(yearsSplit[1])
 			if err != nil {
 				http.Error(w, "Invalid year format", http.StatusBadRequest)
@@ -293,43 +292,59 @@ func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		baseQuery := `
-		SELECT p.id, p.name, p.category_id, p.description, p.brand, p.is_universal
+		SELECT DISTINCT p.id, p.name, p.category_id, p.description, p.for_brand, p.is_universal, p.importer_name
 		FROM products p
 		LEFT JOIN product_compatibility pc ON p.id = pc.product_id
 		LEFT JOIN motorcycles m ON pc.motorcycle_id = m.id
 		LEFT JOIN brands b ON m.brand_id = b.id
 		LEFT JOIN models mo ON m.model_id = mo.id
 		LEFT JOIN categories c ON p.category_id = c.id
-		WHERE (p.is_universal = TRUE`
+		`
 
-		var args []interface{}
+		whereClauses := []string{}
+		args := []interface{}{}
 		argPos := 1
 
 		if brand != "" {
-			baseQuery += fmt.Sprintf(" OR b.name ILIKE $%d", argPos)
+			whereClauses = append(whereClauses, fmt.Sprintf("b.name ILIKE $%d", argPos))
 			args = append(args, brand)
 			argPos++
 		}
 		if model != "" {
-			baseQuery += fmt.Sprintf(" AND mo.name ILIKE $%d", argPos)
+			whereClauses = append(whereClauses, fmt.Sprintf("mo.name ILIKE $%d", argPos))
 			args = append(args, model)
 			argPos++
 		}
 		if yearStr != "" {
-			baseQuery += fmt.Sprintf(" AND m.startyear <= $%d AND m.endyear >= $%d", argPos, argPos+1)
+			whereClauses = append(whereClauses,
+				fmt.Sprintf("m.startyear <= $%d AND m.endyear >= $%d", argPos, argPos+1))
 			args = append(args, startyear, endyear)
 			argPos += 2
 		}
-		if category != "" {
-			baseQuery += fmt.Sprintf(" AND c.name ILIKE $%d", argPos)
-			args = append(args, category)
+
+		if categoryIDStr != "" {
+			catID, err := strconv.Atoi(categoryIDStr)
+			if err != nil {
+				http.Error(w, "Invalid category_id", http.StatusBadRequest)
+				return
+			}
+			whereClauses = append(whereClauses,
+				fmt.Sprintf("(c.id = $%d OR c.path LIKE '%%/' || $%d || '/%%')", argPos, argPos))
+			args = append(args, catID)
 			argPos++
 		}
 
-		baseQuery += ")"
+		// Om inga specifika filters är satta → visa bara universella produkter
+		if len(whereClauses) == 0 {
+			whereClauses = append(whereClauses, "p.is_universal = TRUE")
+		}
 
-		rows, err := db.Query(baseQuery, args...)
+		finalQuery := baseQuery + " WHERE " + strings.Join(whereClauses, " AND ")
+		log.Printf("Executing SQL:\n%s\nWith args: %+v\n", finalQuery, args)
+
+		rows, err := db.Query(finalQuery, args...)
 		if err != nil {
+			log.Printf("Database query error: %v\n", err)
 			http.Error(w, "Database query error", http.StatusInternalServerError)
 			return
 		}
@@ -338,10 +353,39 @@ func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
 		var products []Product
 		for rows.Next() {
 			var p Product
-			if err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.Brand, &p.IsUniversal); err != nil {
+			if err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.ForBrand, &p.IsUniversal, &p.ImporterName); err != nil {
+				log.Printf("Error scanning product: %v\n", err)
 				http.Error(w, "Error scanning product", http.StatusInternalServerError)
 				return
 			}
+
+			// Hämta motorcyklar för produkten
+			mcRows, err := db.Query(`
+				SELECT m.id, b.name, mo.name, m.startyear, m.endyear
+				FROM product_compatibility pc
+				JOIN motorcycles m ON pc.motorcycle_id = m.id
+				JOIN brands b ON m.brand_id = b.id
+				JOIN models mo ON m.model_id = mo.id
+				WHERE pc.product_id = $1
+			`, p.ID)
+			if err != nil {
+				log.Printf("Error querying motorcycles: %v\n", err)
+				http.Error(w, "Error querying motorcycles", http.StatusInternalServerError)
+				return
+			}
+
+			defer mcRows.Close()
+			var motorcycles []Motorcycle
+			for mcRows.Next() {
+				var m Motorcycle
+				if err := mcRows.Scan(&m.ID, &m.Brand, &m.Model, &m.StartYear, &m.EndYear); err != nil {
+					log.Printf("Error scanning motorcycle: %v\n", err)
+					continue
+				}
+				motorcycles = append(motorcycles, m)
+			}
+
+			p.Motorcycles = motorcycles
 			products = append(products, p)
 		}
 
