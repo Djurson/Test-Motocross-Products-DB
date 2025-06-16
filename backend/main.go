@@ -273,34 +273,50 @@ func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
 
 		var startyear, endyear int
 		var err error
+
 		if yearStr != "" {
-			yearsSplit := strings.Split(yearStr, "-")
-			if len(yearsSplit) != 2 {
-				http.Error(w, "Invalid year range format", http.StatusBadRequest)
-				return
-			}
-			startyear, err = strconv.Atoi(yearsSplit[0])
+			startyear, endyear, err = extractYears(yearStr)
 			if err != nil {
-				http.Error(w, "Invalid year format", http.StatusBadRequest)
-				return
-			}
-			endyear, err = strconv.Atoi(yearsSplit[1])
-			if err != nil {
-				http.Error(w, "Invalid year format", http.StatusBadRequest)
+				log.Printf("Error when extracting years: %v", err)
+				http.Error(w, "Error when extracting years", http.StatusBadRequest)
 				return
 			}
 		}
 
 		baseQuery := `
-		SELECT DISTINCT p.id, p.name, p.category_id, p.description, p.for_brand, p.is_universal, p.importer_name
+			WITH RECURSIVE category_tree AS (
+				SELECT id, name, parent_id, '/' || id || '/' AS path
+				FROM categories
+				WHERE parent_id IS NULL
+				UNION ALL
+				SELECT c.id, c.name, c.parent_id, ct.path || c.id || '/'
+				FROM categories c
+				JOIN category_tree ct ON c.parent_id = ct.id
+			),
+			category_paths AS (
+				SELECT c1.id AS category_id, string_agg(c2.name, '/' ORDER BY position) AS full_category_path
+				FROM category_tree c1
+				JOIN category_tree c2 ON c1.path LIKE '%/' || c2.id || '/%'
+				JOIN LATERAL (
+					SELECT position
+					FROM regexp_split_to_table(c1.path, '/') WITH ORDINALITY AS t(part, position)
+					WHERE part = c2.id::text
+					LIMIT 1
+				) pos ON true
+				GROUP BY c1.id
+			)
+
+		SELECT DISTINCT 
+			p.id, p.name, p.category_id, cp.full_category_path,
+			p.description, p.for_brand, p.is_universal, p.importer_name
 		FROM products p
 		LEFT JOIN product_compatibility pc ON p.id = pc.product_id
 		LEFT JOIN motorcycles m ON pc.motorcycle_id = m.id
 		LEFT JOIN brands b ON m.brand_id = b.id
 		LEFT JOIN models mo ON m.model_id = mo.id
 		LEFT JOIN categories c ON p.category_id = c.id
+		LEFT JOIN category_paths cp ON p.category_id = cp.category_id
 		`
-
 		whereClauses := []string{}
 		args := []interface{}{}
 		argPos := 1
@@ -350,48 +366,84 @@ func getFilteredProductsHandler(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		var products []Product
-		for rows.Next() {
-			var p Product
-			if err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.Description, &p.ForBrand, &p.IsUniversal, &p.ImporterName); err != nil {
-				log.Printf("Error scanning product: %v\n", err)
-				http.Error(w, "Error scanning product", http.StatusInternalServerError)
-				return
-			}
+		products, err := extractProductsFromRows(rows, db)
+		if err != nil {
+			http.Error(w, "Error scanning product", http.StatusInternalServerError)
+			return
+		}
 
-			// Hämta motorcyklar för produkten
-			mcRows, err := db.Query(`
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(products)
+	}
+}
+
+func extractYears(yearString string) (int, int, error) {
+	yearsSplit := strings.Split(yearString, "-")
+	if len(yearsSplit) != 2 {
+		return 0, 0, nil
+	}
+	startyear, err := strconv.Atoi(yearsSplit[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	endyear, err := strconv.Atoi(yearsSplit[1])
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return startyear, endyear, nil
+}
+
+func extractProductsFromRows(rows *sql.Rows, db *sql.DB) ([]Product, error) {
+	var err error
+
+	var products []Product
+
+	for rows.Next() {
+		var p Product
+		if err := rows.Scan(&p.ID, &p.Name, &p.CategoryID, &p.CategoryPath, &p.Description, &p.ForBrand, &p.IsUniversal, &p.ImporterName); err != nil {
+			log.Printf("Error scanning product: %v\n", err)
+			return nil, err
+		}
+
+		p.Motorcycles, err = extractMotorcyclesForProduct(p.ID, db)
+		if err != nil {
+			return nil, err
+		}
+		products = append(products, p)
+	}
+
+	return products, nil
+}
+
+func extractMotorcyclesForProduct(prodID string, db *sql.DB) ([]Motorcycle, error) {
+	// Hämta motorcyklar för produkten
+	mcRows, err := db.Query(`
 				SELECT m.id, b.name, mo.name, m.startyear, m.endyear
 				FROM product_compatibility pc
 				JOIN motorcycles m ON pc.motorcycle_id = m.id
 				JOIN brands b ON m.brand_id = b.id
 				JOIN models mo ON m.model_id = mo.id
 				WHERE pc.product_id = $1
-			`, p.ID)
-			if err != nil {
-				log.Printf("Error querying motorcycles: %v\n", err)
-				http.Error(w, "Error querying motorcycles", http.StatusInternalServerError)
-				return
-			}
-
-			defer mcRows.Close()
-			var motorcycles []Motorcycle
-			for mcRows.Next() {
-				var m Motorcycle
-				if err := mcRows.Scan(&m.ID, &m.Brand, &m.Model, &m.StartYear, &m.EndYear); err != nil {
-					log.Printf("Error scanning motorcycle: %v\n", err)
-					continue
-				}
-				motorcycles = append(motorcycles, m)
-			}
-
-			p.Motorcycles = motorcycles
-			products = append(products, p)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(products)
+				LIMIT 10
+				`, prodID)
+	if err != nil {
+		log.Printf("Error querying motorcycles: %v\n", err)
+		return nil, err
 	}
+
+	defer mcRows.Close()
+	var motorcycles []Motorcycle
+	for mcRows.Next() {
+		var m Motorcycle
+		if err := mcRows.Scan(&m.ID, &m.Brand, &m.Model, &m.StartYear, &m.EndYear); err != nil {
+			log.Printf("Error scanning motorcycle: %v\n", err)
+			continue
+		}
+		motorcycles = append(motorcycles, m)
+	}
+
+	return motorcycles, nil
 }
 
 func uploadFileHandler(db *sql.DB) http.HandlerFunc {

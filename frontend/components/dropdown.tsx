@@ -27,13 +27,13 @@ export function DropDown<T>({ label, placeholder, disabled, input, setInput, typ
   const selectedValue = selectedItem ? getOptionValue(selectedItem) : undefined;
 
   return (
-    <div className="flex flex-col items-start justify-center gap-1">
+    <div className="flex flex-col items-start justify-center w-full gap-1">
       <Label className="text-sm">{label}</Label>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild disabled={disabled}>
           <Button variant="outline" role="combobox" aria-expanded={open} className="w-[200px] justify-between">
             {selectedValue ? getOptionLabel(data.find((d) => getOptionValue(d) === selectedValue) as T) : placeholder}
-            <ChevronsUpDown className="opacity-50 ml-2 h-4 w-4" />
+            <ChevronsUpDown className="w-4 h-4 ml-2 opacity-50" />
           </Button>
         </PopoverTrigger>
         {data && (
@@ -51,7 +51,16 @@ export function DropDown<T>({ label, placeholder, disabled, input, setInput, typ
                         key={value}
                         value={value}
                         onSelect={() => {
-                          setInput({ ...input, [type]: item });
+                          let updatedInput: UserInput = { ...input, [type]: item };
+
+                          if (type === "brand") {
+                            updatedInput.model = undefined;
+                            updatedInput.year = undefined;
+                          } else if (type === "model") {
+                            updatedInput.year = undefined;
+                          }
+
+                          setInput(updatedInput);
                           setOpen(false);
                         }}>
                         {label}

@@ -24,7 +24,6 @@ export default function Home() {
   const [years, setYears] = useState<ModelYear[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
 
-  console.log(products);
   // Fetching brands
   useEffect(() => {
     async function fetchBrands() {
@@ -65,10 +64,6 @@ export default function Home() {
     }
 
     fetchModels();
-
-    setUserInput({
-      brand: userInput.brand,
-    });
   }, [userInput.brand]);
 
   useEffect(() => {
@@ -84,11 +79,6 @@ export default function Home() {
     }
 
     fetchYears();
-
-    setUserInput({
-      brand: userInput.brand,
-      model: userInput.model,
-    });
   }, [userInput.brand, userInput.model]);
 
   async function search() {
@@ -104,13 +94,13 @@ export default function Home() {
   return (
     <>
       <div className="flex flex-col items-center justify-center w-full gap-8 py-6">
-        <Card className="w-full max-w-6xl">
+        <Card className="w-full max-w-[90vw]">
           <CardHeader>
             <CardTitle>Sök efter delar</CardTitle>
             <CardDescription>Sök och sortera efter delar till både märke samt specifik cross</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-5 grid-rows-1 gap-4 px-8 py-6 rounded-md bg-muted">
+            <div className="grid grid-cols-6 grid-rows-1 gap-4 px-8 py-6 rounded-md bg-muted">
               <DropDown
                 label="Märke"
                 placeholder="Välj märke"
@@ -134,8 +124,8 @@ export default function Home() {
                 getOptionValue={(y) => y.name}
               />
               <DropDown
-                label="Motorstorlek"
-                placeholder="Välj motorstorlek (cc)"
+                label="År"
+                placeholder="Välj årsspann"
                 disabled={userInput?.model ? false : true}
                 input={userInput}
                 setInput={setUserInput}
@@ -157,6 +147,9 @@ export default function Home() {
               />
               <Button className="self-end" variant="default" onClick={search}>
                 Sök
+              </Button>
+              <Button className="self-end" variant="destructive" onClick={() => setUserInput({ brand: undefined, model: undefined, year: undefined, category: undefined })}>
+                Rensa
               </Button>
             </div>
           </CardContent>

@@ -22,14 +22,16 @@ type Motorcycle struct {
 }
 
 type Product struct {
-	ID           int          `json:"id"`
+	ID           string       `json:"id"`
 	Name         string       `json:"name"`
 	CategoryID   int          `json:"category_id"`
+	CategoryName string       `json:"category_name"`
+	CategoryPath string       `json:"category_path"`
 	Description  string       `json:"description"`
 	ForBrand     string       `json:"for_brand"`
 	IsUniversal  bool         `json:"is_universal"`
-	Motorcycles  []Motorcycle `json:"motorcycles"`
 	ImporterName string       `json:"importer_name"`
+	Motorcycles  []Motorcycle `json:"motorcycles"`
 }
 
 type Category struct {

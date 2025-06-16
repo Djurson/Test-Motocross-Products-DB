@@ -27,14 +27,15 @@ export default function ProductTable({ products }: { products: Product[] }) {
 
   return (
     <>
-      <Table className="w-full max-w-6xl">
+      <Table className="w-full max-w-[90vw]">
         <TableHeader>
           <TableRow>
             <TableHead>Artikelnummer</TableHead>
             <TableHead>Leverantör</TableHead>
             <TableHead>Namn</TableHead>
             <TableHead>Motorcykel märke</TableHead>
-            <TableHead>Passar till</TableHead>
+            <TableHead>Motorcykel modell</TableHead>
+            <TableHead>Under kategori</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -49,77 +50,85 @@ export default function ProductTable({ products }: { products: Product[] }) {
                   <>Universal</>
                 ) : (
                   <>
-                    {product.motorcycles.map((moto) => (
-                      <span>
-                        {moto.brand} {moto.model} {moto.start_year}–{moto.end_year}
-                      </span>
-                    ))}
+                    {product.motorcycles.length >= 10 ? (
+                      <>Fler än 10 st modeller</>
+                    ) : (
+                      <>
+                        {product.motorcycles.map((moto) => {
+                          return (
+                            <span key={moto.id}>
+                              {moto.model} {moto.start_year}-{moto.end_year === 9999 ? "" : moto.end_year}, <br />
+                            </span>
+                          );
+                        })}
+                      </>
+                    )}
                   </>
                 )}
               </TableCell>
+              <TableCell>{product.category_path}</TableCell>
             </TableRow>
           ))}
         </TableBody>
         <TableFooter>
           <TableRow>
-            <TableCell colSpan={5} className="text-center font-bold">
+            <TableCell colSpan={6} className="font-bold text-center">
               Totalt: {products.length} produkter hittade
             </TableCell>
           </TableRow>
         </TableFooter>
       </Table>
 
-      {products.length > 0 ||
-        (products.length > 30 && (
-          <Pagination>
-            <PaginationContent>
-              {currentPage !== 1 && (
+      {products.length > 0 && products.length > 30 && (
+        <Pagination>
+          <PaginationContent>
+            {currentPage !== 1 && (
+              <PaginationItem>
+                <PaginationPrevious onClick={handlePrev} />
+              </PaginationItem>
+            )}
+            {startPage > 1 && (
+              <>
                 <PaginationItem>
-                  <PaginationPrevious onClick={handlePrev} />
+                  <PaginationLink onClick={() => handlePageClick(1)}>1</PaginationLink>
                 </PaginationItem>
-              )}
-              {startPage > 1 && (
-                <>
+                {startPage > 2 && (
                   <PaginationItem>
-                    <PaginationLink onClick={() => handlePageClick(1)}>1</PaginationLink>
+                    <PaginationEllipsis />
                   </PaginationItem>
-                  {startPage > 2 && (
-                    <PaginationItem>
-                      <PaginationEllipsis />
-                    </PaginationItem>
-                  )}
-                </>
-              )}
+                )}
+              </>
+            )}
 
-              {pageNumbers.map((page) => (
-                <PaginationItem key={page}>
-                  <PaginationLink isActive={page === currentPage} onClick={() => handlePageClick(page)}>
-                    {page}
-                  </PaginationLink>
-                </PaginationItem>
-              ))}
+            {pageNumbers.map((page) => (
+              <PaginationItem key={page}>
+                <PaginationLink isActive={page === currentPage} onClick={() => handlePageClick(page)}>
+                  {page}
+                </PaginationLink>
+              </PaginationItem>
+            ))}
 
-              {endPage < totalPages && (
-                <>
-                  {endPage < totalPages - 1 && (
-                    <PaginationItem>
-                      <PaginationEllipsis />
-                    </PaginationItem>
-                  )}
+            {endPage < totalPages && (
+              <>
+                {endPage < totalPages - 1 && (
                   <PaginationItem>
-                    <PaginationLink onClick={() => handlePageClick(totalPages)}>{totalPages}</PaginationLink>
+                    <PaginationEllipsis />
                   </PaginationItem>
-                </>
-              )}
-
-              {currentPage !== totalPages && (
+                )}
                 <PaginationItem>
-                  <PaginationNext onClick={handleNext} />
+                  <PaginationLink onClick={() => handlePageClick(totalPages)}>{totalPages}</PaginationLink>
                 </PaginationItem>
-              )}
-            </PaginationContent>
-          </Pagination>
-        ))}
+              </>
+            )}
+
+            {currentPage !== totalPages && (
+              <PaginationItem>
+                <PaginationNext onClick={handleNext} />
+              </PaginationItem>
+            )}
+          </PaginationContent>
+        </Pagination>
+      )}
     </>
   );
 }

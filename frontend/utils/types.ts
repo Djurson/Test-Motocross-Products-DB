@@ -36,11 +36,12 @@ export type Motorcycle = {
 };
 
 export type Product = {
-  id: number;
+  id: string;
   name: string;
   for_brand: string;
   description: string;
   category_id: number;
+  category_path: string;
   is_universal: boolean;
   motorcycles: Motorcycle[];
   importer_name: string;
