@@ -26,7 +26,7 @@ A simple test project for motocross products, and matching them to brand, model 
 │   ├── csvhandler.go               -- Script to import fitment data from CSV
 │   ├── go.dockerfile               -- Go service Dockerfile
 │   ├── main.go                     -- Main API and router logic
-│   ├── test.go                     -- Test for CSV reading
+│   ├── test.go                     -- Test for CSV parsing
 │   └── types.go                    -- Defined types for DB
 │
 ├── frontend/
